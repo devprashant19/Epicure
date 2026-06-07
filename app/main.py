@@ -278,3 +278,33 @@ with ai_tab:
                     if results:
                         map_df = pd.DataFrame(results)
                         st.map(map_df, latitude='lat', longitude='lon')
+
+# --- CLASSIC SEARCH TAB ---
+with classic_tab:
+    with st.form("classic_search"):
+        st.subheader("Find Restaurants with Precision")
+        col1, col2 = st.columns(2)
+        with col1:
+            keyword = st.text_input("Cuisine or Food Type", placeholder="e.g., Pizza, Cafe")
+        with col2:
+            location = st.text_input("Location", placeholder="e.g., Mandi, Himachal Pradesh")
+        diet = st.radio("Dietary Preference", ["Any", "Veg", "Non-Veg"], horizontal=True)
+        submitted = st.form_submit_button("Search Restaurants")
+
+    if submitted:
+        if not keyword or not location:
+            st.warning("Please enter a food type and location.")
+        else:
+            with st.spinner("Finding the best spots..."):
+                params = {"keyword": keyword, "location": location, "diet": diet.lower() if diet != "Any" else None}
+                status, results = search_and_get_details(params)
+
+                if status == "OK" and results:
+                    st.success(f"Found {len(results)} great options for you!")
+                    for r in results:
+                        display_result_card(r)
+                    map_df = pd.DataFrame(results)
+                    st.map(map_df, latitude='lat', longitude='lon')
+                else:
+                    st.error("Couldn't find any restaurants matching your criteria. Please try again.")
+
