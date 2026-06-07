@@ -147,3 +147,8 @@ def get_llm_params(query):
         return json.loads(json_str)
     except Exception:
         return {"keyword": query, "location": None, "vibe": None, "diet": "any"}
+
+
+@st.cache_data(ttl=600)
+def search_and_get_details(params):
+    pass
