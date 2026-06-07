@@ -151,4 +151,54 @@ def get_llm_params(query):
 
 @st.cache_data(ttl=600)
 def search_and_get_details(params):
-    pass
+    """Searches Google Places and gets rich details for each result."""
+    if not params.get("location"): return "NO_LOCATION", None
+
+    geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+    geo_res = requests.get(geocode_url, params={"address": params["location"], "key": GOOGLE_API_KEY})
+    geo_data = geo_res.json()
+    if geo_data.get("status") != "OK": return "GEOCODE_FAILED", None
+    loc = geo_data["results"][0]["geometry"]["location"]
+    lat_lon = f"{loc['lat']},{loc['lng']}"
+
+    search_keyword = f"{params.get('diet') or ''} {params.get('vibe') or ''} {params.get('keyword') or 'restaurant'}".strip()
+
+    places_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+    places_params = {"location": lat_lon, "radius": 5000, "keyword": search_keyword, "key": GOOGLE_API_KEY}
+    places_res = requests.get(places_url, params=places_params)
+    restaurants_found = places_res.json().get("results", [])
+
+    detailed_results = []
+    place_fields = "name,rating,user_ratings_total,price_level,opening_hours,formatted_phone_number,website,geometry,photo,review"
+    for place in restaurants_found[:4]:
+        details_url = "https://maps.googleapis.com/maps/api/place/details/json"
+        details_params = {"place_id": place['place_id'], "fields": place_fields, "key": GOOGLE_API_KEY}
+        details_res = requests.get(details_url, params=details_params)
+        details = details_res.json().get("result", {})
+
+        if details:
+            photo_url = ""
+            if details.get("photos"):
+                photo_ref = details["photos"][0]["photo_reference"]
+                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_ref}&key={GOOGLE_API_KEY}"
+
+            top_review = ""
+            if details.get("reviews"):
+                top_review = f"\"{details['reviews'][0]['text']}\" - {details['reviews'][0]['author_name']}"
+
+            detailed_results.append({
+                "name": details.get("name"),
+                "rating": details.get("rating", "N/A"),
+                "total_ratings": details.get("user_ratings_total", 0),
+                "address": details.get("vicinity"),
+                "price": "$" * details.get("price_level", 0) if details.get("price_level") else "N/A",
+                "open_now": details.get("opening_hours", {}).get("open_now"),
+                "phone": details.get("formatted_phone_number"),
+                "website": details.get("website"),
+                "lat": details.get("geometry", {}).get("location", {}).get("lat"),
+                "lon": details.get("geometry", {}).get("location", {}).get("lng"),
+                "photo_url": photo_url,
+                "review": top_review,
+            })
+
+    return "OK", detailed_results
