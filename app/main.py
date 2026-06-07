@@ -245,3 +245,36 @@ st.markdown('<p class="title">Epicure AI</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Your intelligent guide to the world of food</p>', unsafe_allow_html=True)
 
 ai_tab, classic_tab = st.tabs(["🤖 AI Chat Search", "Classic Search"])
+
+# --- AI CHATBOT TAB ---
+with ai_tab:
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant", "content": "What are you craving? For example, 'a cozy veg cafe in Mandi'."}]
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Your request..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Let me think..."):
+                params = get_llm_params(prompt)
+                status, results = search_and_get_details(params)
+
+                if status == "NO_LOCATION":
+                    st.markdown("Sounds delicious! Where should I look?")
+                elif status == "GEOCODE_FAILED" or not results:
+                    st.markdown("Sorry, I couldn't find any spots matching that. Could you try a different search?")
+                else:
+                    st.markdown(
+                        f"Here are the top spots I found for **'{params.get('keyword')}'** in **{params.get('location')}**:")
+                    for r in results:
+                        display_result_card(r)
+                    if results:
+                        map_df = pd.DataFrame(results)
+                        st.map(map_df, latitude='lat', longitude='lon')
