@@ -8,7 +8,7 @@ Built with production-grade software engineering principles, this project demons
 
 ## ✨ Live Demo
 
-🔗 [Try it here](https://epicure-ai-yfqsyjfhzwj4vdihcmp2ha.streamlit.app/)  
+🔗 [Try it here](https://epicure-ai.streamlit.app)  
 📁 [GitHub Repo](https://github.com/devprashant19/Epicure-AI)
 
 ---
