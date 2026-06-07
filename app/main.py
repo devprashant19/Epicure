@@ -24,3 +24,224 @@ except (KeyError, AttributeError):
     st.error("🚨 API key not found. Please ensure 'google' and 'gemini' keys are in your secrets.toml.")
     st.stop()
 
+# --- UI STYLING (UPGRADED & FIXED) ---
+st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+        html, body, [class*="st-"] {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .stApp {
+            background-color: #0B090C;
+            color: #EAE6F0;
+        }
+
+        #MainMenu, footer, header { visibility: hidden; }
+        .stDeployButton { display: none !important; }
+
+        .title {
+            text-align: center;
+            font-size: 3.5rem;
+            font-weight: 700;
+            padding-top: 2rem;
+        }
+        .subtitle {
+            text-align: center;
+            font-size: 1.2rem;
+            color: #A99EB8;
+            padding-bottom: 2rem;
+        }
+
+        .result-card {
+            background-color: #16161a;
+            border: 1px solid #242629;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+            transition: all 0.2s ease-in-out;
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 1.5rem;
+            padding: 1.5rem;
+        }
+        .result-card:hover {
+            border-color: #7f5af0;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .card-image img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+        .card-info {
+            display: flex;
+            flex-direction: column;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .card-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #fffffe;
+            margin: 0;
+            line-height: 1.2;
+        }
+        .card-rating {
+            background-color: #2cb67d;
+            color: #fffffe;
+            padding: 0.3rem 0.8rem;
+            border-radius: 1rem;
+            font-weight: 600;
+            font-size: 1rem;
+            flex-shrink: 0;
+            margin-left: 1rem;
+        }
+        .card-details, .card-links {
+            font-size: 1rem;
+            color: #94a1b2;
+            margin: 0.5rem 0;
+        }
+        .card-links span, .card-links a {
+            color: #7f5af0;
+            text-decoration: none;
+            margin-right: 1.5rem;
+            font-weight: 600;
+        }
+      
+        .card-review {
+    overflow: hidden; /* Prevent text overflow */
+    white-space: normal; /* Allow text to wrap */
+    word-wrap: break-word; /* Break long words */
+    max-width: 100%; /* Control max width */
+    padding: 10px; /* Optional padding for better appearance */
+    margin: 10px 0; /* Space around the review */
+    border: 1px solid #ccc; /* Optional styling */
+    border-radius: 5px; /* Optional rounded corners */
+}
+    </style>
+""", unsafe_allow_html=True)
+
+
+# --- API & HELPER FUNCTIONS ---
+
+@st.cache_data(ttl=3600)
+def get_llm_params(query):
+    """Uses Gemini to parse a query into structured search parameters."""
+    prompt = f"""
+    You are an expert restaurant recommendation assistant. From the user's query: "{query}", extract the following entities:
+    - "keyword": The main food, cuisine, or type of place.
+    - "vibe": Any specific ambiance or occasion (e.g., "romantic", "casual", "instagram-worthy").
+    - "diet": Specifically identify if the user asks for "veg" or "non-veg". Default to "any".
+    - "location": The city or area to search in.
+    Return ONLY a single, compact JSON object. If a value isn't mentioned, set it to null.
+    """
+    try:
+        response = llm.generate_content(prompt)
+        json_str = response.text.strip().replace("```json", "").replace("```", "").strip()
+        return json.loads(json_str)
+    except Exception:
+        return {"keyword": query, "location": None, "vibe": None, "diet": "any"}
+
+
+@st.cache_data(ttl=600)
+def search_and_get_details(params):
+    """Searches Google Places and gets rich details for each result."""
+    if not params.get("location"): return "NO_LOCATION", None
+
+    geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+    geo_res = requests.get(geocode_url, params={"address": params["location"], "key": GOOGLE_API_KEY})
+    geo_data = geo_res.json()
+    if geo_data.get("status") != "OK": return "GEOCODE_FAILED", None
+    loc = geo_data["results"][0]["geometry"]["location"]
+    lat_lon = f"{loc['lat']},{loc['lng']}"
+
+    search_keyword = f"{params.get('diet') or ''} {params.get('vibe') or ''} {params.get('keyword') or 'restaurant'}".strip()
+
+    places_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+    places_params = {"location": lat_lon, "radius": 5000, "keyword": search_keyword, "key": GOOGLE_API_KEY}
+    places_res = requests.get(places_url, params=places_params)
+    restaurants_found = places_res.json().get("results", [])
+
+    detailed_results = []
+    place_fields = "name,rating,user_ratings_total,price_level,opening_hours,formatted_phone_number,website,geometry,photo,review"
+    for place in restaurants_found[:4]:
+        details_url = "https://maps.googleapis.com/maps/api/place/details/json"
+        details_params = {"place_id": place['place_id'], "fields": place_fields, "key": GOOGLE_API_KEY}
+        details_res = requests.get(details_url, params=details_params)
+        details = details_res.json().get("result", {})
+
+        if details:
+            photo_url = ""
+            if details.get("photos"):
+                photo_ref = details["photos"][0]["photo_reference"]
+                photo_url = f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_ref}&key={GOOGLE_API_KEY}"
+
+            top_review = ""
+            if details.get("reviews"):
+                top_review = f"\"{details['reviews'][0]['text']}\" - {details['reviews'][0]['author_name']}"
+
+            detailed_results.append({
+                "name": details.get("name"),
+                "rating": details.get("rating", "N/A"),
+                "total_ratings": details.get("user_ratings_total", 0),
+                "address": details.get("vicinity"),
+                "price": "$" * details.get("price_level", 0) if details.get("price_level") else "N/A",
+                "open_now": details.get("opening_hours", {}).get("open_now"),
+                "phone": details.get("formatted_phone_number"),
+                "website": details.get("website"),
+                "lat": details.get("geometry", {}).get("location", {}).get("lat"),
+                "lon": details.get("geometry", {}).get("location", {}).get("lng"),
+                "photo_url": photo_url,
+                "review": top_review,
+            })
+
+    return "OK", detailed_results
+
+
+
+
+def display_result_card(result):
+    """Renders a single, detailed result card with image and review."""
+    open_status = "Open" if result.get('open_now') else "Closed" if result.get('open_now') is not None else "N/A"
+    status_class = "card-status-open" if open_status == "Open" else "card-status-closed"
+
+    # Using safe text for phone number and review
+    phone_info = f'📞 {result.get("phone", "N/A")}' if result.get("phone") else ''
+    review_text = result.get("review", "No reviews available.")
+
+    # Displaying review and phone without HTML tags
+    st.markdown(f"""
+        <div class="result-card">
+            <div class="card-image">
+                <img src="{result.get('photo_url') or 'https://via.placeholder.com/200'}" alt="{result.get('name', 'Restaurant Image')}">
+            </div>
+            <div class="card-info">
+                <div class="card-header">
+                    <p class="card-title">{result.get('name')}</p>
+                    <div class="card-rating">⭐ {result.get('rating')}</div>
+                </div>
+                <p class="card-details">
+                    <span style="font-weight: bold;">{result.get('price')}</span> • {result.get('address')}
+                </p>
+                <p class="card-details">
+                    Status: <span class="{status_class}">{open_status}</span>
+                </p>
+                <div class="card-links">{phone_info}</div>
+                <div class="card-review">{review_text}</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+
+# --- MAIN APP LAYOUT ---
+
+st.markdown('<p class="title">Epicure AI</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Your intelligent guide to the world of food</p>', unsafe_allow_html=True)
+
+ai_tab, classic_tab = st.tabs(["🤖 AI Chat Search", "Classic Search"])
